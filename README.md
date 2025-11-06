@@ -13,7 +13,7 @@ Installation can be done by cloning the repository and installing the dependenci
 git clone https://github.com/NADIA/EasyMark.git
 
 # Navigate to the cloned directory
-cd yolov3
+cd EasyMark
 
 # Install required packages
 pip install -r requirements.txt
