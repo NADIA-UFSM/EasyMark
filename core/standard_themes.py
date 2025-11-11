@@ -30,6 +30,7 @@ LIGHT_THEME_SETTINGS = {
         'EasyMark.ImageDisplay.TFrame': {'background': "#cfcfcf"},
         'EasyMark.DataDisplay.TLabel': {'foreground': "#494e53"},
         'EasyMark.TooltipSignal.TLabel': {'foreground': "#ff6600"},
+        'EasyMark.secondary.TLabel': {'foreground': "#555555"},
         'EasyMark.Base.TEntry': {'foreground': "#494e53", 'bordercolor': '#bfbfbf'},
         'EasyMark.Active.TEntry': {'foreground': "#343a40", 'bordercolor': '#bfbfbf'},
         'EasyMark.Wrong.TEntry': {'foreground': "#343a40", 'bordercolor': "#740505"},
@@ -65,6 +66,7 @@ DARK_THEME_SETTINGS = {
         'EasyMark.ImageDisplay.TFrame': {'background': "#3B3B3B"},
         'EasyMark.DataDisplay.TLabel': {'foreground': "#dddddd"},
         'EasyMark.TooltipSignal.TLabel': {'foreground': "#FDF900"},
+        'EasyMark.secondary.TLabel': {'foreground': "#BBBBBB"},
         'EasyMark.Base.TEntry': {'foreground': "#bbbbbb", 'bordercolor': '#555555'},
         'EasyMark.Active.TEntry': {'foreground': "#ffffff", 'bordercolor': '#555555'},
         'EasyMark.Wrong.TEntry': {'foreground': "#ffffff", 'bordercolor': "#B60505"},
@@ -77,6 +79,7 @@ DARK_THEME_SETTINGS = {
 LIGHT_THEMEDEFINITION = ThemeDefinition('EM_light_standard', LIGHT_THEME_SETTINGS['colors'], LIGHT_THEME_SETTINGS['type'])
 DARK_THEMEDEFINITION = ThemeDefinition('EM_dark_standard', DARK_THEME_SETTINGS['colors'], DARK_THEME_SETTINGS['type'])
 
+#* Fully documented
 def register_themes() -> None:
     """Registers the standard themes to be used by the window."""
     base_style = Style()

@@ -19,8 +19,7 @@ ultralytics_logger = logging.getLogger('ultralytics')
 ch = logging.StreamHandler(log_catcher)
 ultralytics_logger.addHandler(ch)
 
-
-
+#! Not documented
 class DetectToProject: 
     """Tool for segmenting 
     """
@@ -65,6 +64,7 @@ class DetectToProject:
         return True
     
     def extract_data(self) -> bool:
+        if not self.proj_dir: return False
         with open(self.proj_dir, 'r') as file:
             data: dict = json.load(file)
         
@@ -257,7 +257,7 @@ class DetectToProject:
 # ========================================================== #
 # ========================================================== #
 
-
+#! Not documented
 class ProgressWindow(tkb.Toplevel):
     def __init__(self, max_val: int):
         super().__init__(title=_("Progress"), topmost=True, minsize=[300, 130])
@@ -320,7 +320,7 @@ class ProgressWindow(tkb.Toplevel):
 # ========================================================== #
 # ========================================================== #
 
-
+#! Not documented
 class ExportAnnotations:
     def __init__(self,
             data_dir: str,
@@ -491,12 +491,4 @@ class ExportAnnotations:
                 yaml.write('\nnames:\n')
                 for id, name in self.classes:
                     yaml.write(f'    {id}: {name}')
-                
-            
-# ========================================================== #
-# ========================================================== #
 
-
-class FilterImages:
-    def __init__(self) -> None:
-        raise NotImplementedError("If you are seeing this. How???")

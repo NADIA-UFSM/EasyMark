@@ -1,5 +1,5 @@
 """
-Module that handles image and data processing, saving and loading makrs, classes and images
+Module that handles image and data processing, saving and loading makrs, categories and images
 """
 from tkinter import filedialog, messagebox
  
@@ -12,74 +12,104 @@ from PIL import Image
 from PIL.ImageFile import ImageFile
 from typing import Literal, Any, Optional
 from collections.abc import Callable
-from .constants import translator as _
+from .constants import CONFIG, translator as _
+from .typeAliases import AnnotationDataType, ImageDataType, CategoryDataType
+
 
 # ========================================================== #
 # ========================================================== #
 
-class AnnPoly:
+
+
+class Annotation:
     """Object storing all data related to an annotation polygon.
     """
-    classe: str
-    point_coords: list[float]
-    polygon_id: str
+    cat_id: str
+    coords: list[float]
+    annotation_id: str
+    annotation_type: Literal['bbox', 'obbox', 'poly', 'mark']
     metadata: dict[str, str]
     
     def __init__(self,
-                 first_point: str = 'd0',
-                 classe: str = '',
-                 polygon_id: str = '',
-                 point_coords: list[float] = None,
-                 metadata: dict[str, str] = None, 
+                 annotation_id: str,
+                 cat_id: str,
+                 point_coords: list[float],
+                 annotation_type: Literal['bbox', 'obbox', 'poly', 'mark'] = 'poly',
+                 metadata: Optional[dict[str, str]] = None, 
+                 point_id: int = 0, 
                  ):
         """Object storing all data related to an annotation polygon.
 
         Args:
-            first_point (str, optional): Canvas id of the polygon's starting point. Defaults to 'd0'.
-            classe (str, optional): Class tag_id of the polygon. Defaults to ''.
-            polygon_id (str, optional): Polygon's unique id tag. Defaults to ''.
-            point_coords (list[float], optional): Coordinates of each point making up the polygon in the form `[x1, y1, x2, y2, ...]`. Defaults to None.
-            metadata (dict[str, str], optional): Dictionary with all metadata in the form `{"field1": "data", "field2", "data"}`. Defaults to None.
+            point_coords (list[float]): Coordinates of each point making up the polygon in the form `[x1, y1, x2, y2, ...]`..
+            cat_id (str): Class cat_id of the polygon.
+            annotation_id (str): Polygon's unique id tag.
+            metadata (dict[str, str], optional): Dictionary with all metadata in the form `{"field1": "data", "field2", "data"}`. Defaults to ''.
         """
-        self.points = [first_point]
-        self.classe = classe
-        self.point_coords = point_coords
-        self.polygon_id = polygon_id
-        self.metadata = metadata
+        self.annotation_type = annotation_type
+        self.cat_id = cat_id
+        self.coords = point_coords
+        self.annotation_id = annotation_id
+        self.metadata = {} if metadata is None else metadata
+        self.point_ids = [point_id]
     
-    def new_point(self, point: str) -> None:
+    def add_point(self, point_id: int, point_coords: list[float]) -> None:
         """Adds the canvas id of a point to the list of points.
 
         Args:
             point (str): Canvas id of the new point.
         """
-        self.points.append(point)
+        self.point_ids.append(point_id)
+        self.coords += point_coords
     
-    def new_points(self, points: list[str]) -> None:
-        """Adds the canvas id of multiple points to the list of points.
-
-        Args:
-            points (list[str]): List with the canvas id of each new point.
-        """
-        self.points += points
-    
-    def remove_last(self) -> None:
+    def remove_points(self, num_points: int = 1) -> tuple[list[int], list[float]]:
         """Removes the last point id from the list of points
         """
-        del self.points[-1]
-
+        match self.annotation_type:
+            case 'mark':
+                return self.point_ids, self.coords                
+            case 'bbox':
+                num_points = min(num_points, 2)
+                deleted_points = self.point_ids[-num_points:]
+                del self.point_ids[-num_points:]
+                
+                if num_points == 1:
+                    deleted_coords = self.coords[4:6]
+                    del self.coords[2:]
+                else:
+                    deleted_coords = self.coords[0:2] + self.coords[4:6]
+                    del self.coords[:] 
+            case 'obbox':
+                num_points = min(num_points, 3)
+                deleted_points = self.point_ids[-num_points:]
+                del self.point_ids[-num_points:]
+                
+                del self.coords[6:]
+                deleted_coords = self.coords[-num_points*2:]
+                del self.coords[-num_points*2:]
+            case 'poly':
+                deleted_points = self.point_ids[-num_points:]
+                del self.point_ids[-num_points:]
+                
+                deleted_coords = self.coords[-num_points*2:]
+                del self.coords[-num_points*2:]
+        return deleted_points, deleted_coords
+    
+    def set(self, coords: Optional[list[float]] = None, point_ids: Optional[list[int]] = None, metadata: Optional[dict[str, str]] = None) -> None:
+        if coords is not None: self.coords = coords
+        if point_ids is not None: self.point_ids = point_ids
+        if metadata is not None: self.metadata = metadata
+    
+    def data(self) -> AnnotationDataType:
+        return self.cat_id, self.coords, self.annotation_type, self.metadata
+    
     def __len__(self) -> int:
-        return int(len(self.point_coords)/2)
-        
+        return int(len(self.coords)/2)
+
     def __str__(self) -> str:
-        return f'polygon_id = {self.polygon_id}'\
-               f'\n  > classe = {self.classe}'\
-               f'\n  > point_coords = {self.point_coords}'\
-               f'\n  > points = {self.points}'\
-               f'\n  > metadata = {self.metadata}'
+        return f'{self.cat_id = }, {self.coords = }, {self.point_ids = }, {self.annotation_id = }, {self.annotation_type = }, {self.metadata = }'
 
-
-class MarkedImage:
+class AnnImage:
     """Object holding the image data to be loaded and all marking/annotation.
     """
     def __init__(self, path: str, index: int):
@@ -94,9 +124,8 @@ class MarkedImage:
         self.size: tuple[int, int] = (1, 1) #* (width, height)
         self.index: int = index
         self.image: ImageFile | None = None
-        self.marks: dict[str, list[str]] = {} #* 'tag_id': ['coordx coordy', ...]
-        self.wip_poly: AnnPoly | None = None
-        self.ann_polys: list[AnnPoly] = []
+        self.wip_ann: Annotation | None = None
+        self.annotations: list[Annotation] = []
 
     def load(self) -> None:
         """Loas the image onto memory for display.
@@ -111,53 +140,47 @@ class MarkedImage:
         self.image.close()
         self.image = None
 
-    def new_annpoly(self, polygon: AnnPoly) -> None:
-        """Stores an AnnPoly in construction.
+    def new_annotation(self, polygon: Annotation) -> None:
+        """Stores an Annotation in construction.
 
         Args:
-            polygon (AnnPoly): AnnPoly to be stored.
+            polygon (Annotation): Annotation to be stored.
         """
-        self.wip_poly = polygon
+        self.wip_ann = polygon
     
-    def store_annpoly(self) -> None:
-        """Stores a completed AnnPoly alongside the others to be saved.
+    def store_annotation(self, annotation: Optional[Annotation] = None) -> None:
+        """Stores a completed Annotation alongside the others to be saved.
         """
-        if self.wip_poly is None: return
-        self.ann_polys.append(self.wip_poly)
+        if annotation is not None: self.annotations.append(annotation)
+        elif self.wip_ann is not None: self.annotations.append(self.wip_ann)
     
     def clear_wip(self) -> None:
-        """Clears the current AnnPoly work in progress.
+        """Clears the current Annotation work in progress.
         """
-        self.wip_poly = None
+        self.wip_ann = None
     
-    def find_annpoly(self, key: Callable[[AnnPoly], bool]) -> int | None:
+    def find_annotation(self, key: Callable[[Annotation], bool]) -> int | None:
         """Searches for the first annotation polygon that satisfy the search key. 
 
         Args:
-            key (Callable[[AnnPoly], bool]): Search key.
+            key (Callable[[Annotation], bool]): Search key.
 
         Returns:
-            int | None: Index of the polygon within the list or None if not found.
+            Index (int | None): Index of the polygon within the list or None if not found.
         """
-        for poly in self.ann_polys:
-            if key(poly):
-                return self.ann_polys.index(poly)
+        for ann in self.annotations:
+            if key(ann):
+                return self.annotations.index(ann)
         else: return
 
-
     def __str__(self) -> str:
-        text = f'name = {self.name}\npath = {self.path}\nindex = {self.index}'
-        text += '\n     marks:'
-        for classe, pontos in self.marks.items():
-            text += f'\n > {classe}'
-            for ponto in pontos:
-                text += f'\n  - {ponto}'
-        text += '\n     ann_polys: \n       '
-        text += '\n       '.join([str(annpoly).replace('\n', '\n       ') for annpoly in self.ann_polys])
-        return text
+        return f'name: {self.name} \npath: {self.path} \nsize: {self.size} \nindex: {self.index} \nannotations:\n {'\n '.join([str(ann) for ann in self.annotations])}'
+        
+# ========================================================== #
+# ========================================================== #
 
-# ========================================================== #
-# ========================================================== #
+
+
 
 
 @dataclass
@@ -167,18 +190,16 @@ class ImageData:
     
     directory: str
     mode: Literal['manual', 'semiauto']
-    sec_mode: Literal['polygon', 'bbox']
     date_create: str
     date_last: str
-    classes: dict[str, Any]
+    categories: dict[str, CategoryDataType]
     
     def __init__(self, 
                  directory: str = '',
-                 mode: Literal['manual', 'semiauto'] = 'manual', 
-                 sec_mode: Literal['polygon', 'bbox'] = 'polygon',
+                 mode: Literal['manual', 'semiauto'] = 'manual',
                  date_create: str = '',
                  date_last: str = '',
-                 classes: dict[str, dict[str, Any]] | None = None):
+                 categories: Optional[dict[str, CategoryDataType]] = None):
         """Class to store the data of a marking project.
 
         Args:
@@ -188,18 +209,17 @@ class ImageData:
                 - semiauto: For semiautomatic annotation ('marking').
             date_create (str) : The date and hour in which this project started
             date_create (str) : The date and hour in which this project was last worked on
-            classes (dict[int, list[str]]) : Dictionary with the data of each class, with the format:
-                {tag_id: {'id': 0, 'name': 'Car' 'hex_code': '#000000'}, ...} 
+            categories (dict[int, list[str]]) : Dictionary with the data of each categories, with the format:
+                {cat_id: {'id': 0, 'name': 'Car' 'hex_code': '#000000'}, ...} 
         """
         self.directory = directory
         self.mode = mode
-        self.sec_mode = sec_mode
         self.date_create = date_create if date_create != '' \
                            else datetime.now().strftime("%d/%m/%Y %H:%M")
         self.date_last = date_last
-        self.classes: dict[str, dict[str, Any]] = {} if classes is None else classes
+        self.categories = {} if categories is None else categories
         
-        self.list_images: list[MarkedImage] = []
+        self.list_images: list[AnnImage] = []
         self.active_index = 0
         
     # ---------------------------------------------------------- #
@@ -212,10 +232,10 @@ class ImageData:
         """
         path = ospath.join(self.directory, name)
         index = len(self.list_images)
-        image = MarkedImage(path, index)
+        image = AnnImage(path, index)
         self.list_images.append(image)
     
-    def cur_image(self) -> MarkedImage | None:
+    def cur_image(self) -> AnnImage | None:
         """Returns the currently loaded MarkedImage, returns None if empty.
 
         Returns:
@@ -248,7 +268,7 @@ class ImageData:
     
     # ---------------------------------------------------------- #
     
-    def update_date(self, mode: str) -> str:
+    def update_date(self, mode: str) -> str | None:
         """Updates date of last editing or returns a string with the date.
 
         Args:
@@ -261,15 +281,15 @@ class ImageData:
         if mode == 'backup': return now
         self.date_last = now
     
-    def update_classes(self, tag_id: str, class_data: dict[str, Any]) -> None:
-        """Adds or updates the classes dictionary with the given tag_id.
+    def update_categories(self, cat_id: str, categories_data: CategoryDataType) -> None:
+        """Adds or updates the categories dictionary with the given cat_id.
 
         Args:
-            tag_id (str): Class tag_id to be aded or updated.
-            class_data (dict[str, Any]): Data of the class with the format:
+            cat_id (str): Class cat_id to be aded or updated.
+            categories_data (dict[str, Any]): Data of the categories with the format:
                 {'id': 0, 'name': 'Car' 'hex_code': '#000000'}
         """
-        self.classes.update({tag_id:class_data})    
+        self.categories.update({cat_id:categories_data})    
     
     # ---------------------------------------------------------- #
     
@@ -286,126 +306,53 @@ class ImageData:
         for image in images:
             self.append(image)
     
-    def load_marks(self, all_marks: dict[str, dict[str, list[str]]]) -> tuple[int, str]:
-        """Loads all marking points to their corresponding images. 
-
-        Args:
-            all_marks (dict[str, dict[str, list[str]]]) : Dicitionary with the data of each marked image of format:
-                {"image_name.png": {"class_tag_id": ["x y", ...], ...}, ...}
-
-        Returns:
-            last (tuple[int, str]): Index and name of the last image to be marked.
-        """
-        if len(self) == 0:
-            self.load_directory()
-        last = (0, '')
-        for image in self.list_images:
-            if image.name not in all_marks.keys(): continue
-            image.marks = all_marks[image.name]
-            last = (image.index, image.name)
-        return last
-    
-    def load_annpolygons(self, all_polys: dict[str, dict[str, tuple[str, list[float], dict[str, str]]]]) -> tuple[int, str]:
+    def load_annpolygons(self, all_polys: dict[str, ImageDataType]) -> tuple[int, str]:
         """Loads all annotation polygons to their corresponding images.
 
         Args:
             all_polys (dict[str, dict[str, tuple[str, list[float], dict[str, str]]]]): Dictionary with the data of each annotatd image with format:
-                {"image_name.png": {"polygon_id": ("class_tag_id", [x1, y1, x2, y2, ...], {"field1": "metadata1", "field2": "metadata2", ...}), ...}, ...}
+                {"image_name.png": {"annotation_id": ([x1, y1, x2, y2, ...], "cat_id", "polygon_type", {"field1": "metadata1", "field2": "metadata2", ...}), ...}, ...}
 
         Returns:
             last (tuple[int, str]): Index and name of the last image to be annotated.
         """
-        if len(self) == 0:
-            self.load_directory()
+        if len(self) == 0: self.load_directory()
         
         last = (0, self.list_images[0].name)
         for image in self.list_images:
             if image.name not in all_polys.keys(): continue
-            for polygon_id, polygon_data in all_polys[image.name].items():
-                if polygon_id == 'image_size':
-                    image.size = polygon_data
+            for annotation_id, annotation_data in all_polys[image.name].items():
+                if annotation_id == 'image_size':
+                    assert len(annotation_data) == 2
+                    image.size = annotation_data; 
                     continue
-                image.ann_polys.append(AnnPoly(polygon_id=polygon_id, 
-                                               classe=polygon_data[0], 
-                                               point_coords=polygon_data[1],
-                                               metadata=polygon_data[2]))
+                assert len(annotation_data) == 4
+                image.annotations.append(Annotation(annotation_id, *annotation_data))
             last = (image.index, image.name)
         return last
-            
-    def sort_annotations(self, ann_dir: str) -> dict[str, dict[str, list[list[float]]]]:
-        """Returns a dictionary where every key is an annotation file in ``ann_dir`` and each item is a secondary dictionary.\\
-        This secondary dictionary holds each class present in the annotation file, connected to a list of polygons (list of floats).
-        
-        Args:
-            ann_dir (str) : The path for the directory holding the txt files.
-        
-        Returns:
-            annotations (dict[str, dict[int, list[list[float]]]]) : Dictonary holding all annotations of each file, sorted alphabeticaly of format:
-                {'file_name1': {0: [[x1, y1, x2, y2,...], ...], ...}, ...}
-        
-        """
-        
-        ann_data: dict[str, dict[int: list[list[float]]]] = {}
-        for ann_file in listdir(ann_dir):
-            *file_name, ext = ann_file.split('.')
-            if ext != 'txt': continue
-            else: file_name = '.'.join(file_name)
-            
-            ann_data[file_name] = {}
-            with open(ospath.join(ann_dir, ann_file), 'r') as file_data:
-                cur_ann_data: dict[int: list[list[float]]] = {}
-                for line in file_data:
-                    classe, *poly = line.split()
-                    poly = [float(coord) for coord in poly]
-                    if classe not in cur_ann_data:
-                        cur_ann_data[classe] = [poly]
-                    else:
-                        cur_ann_data[classe].append(poly)
-                        
-            ann_data[file_name] = dict(sorted(cur_ann_data.items(), key=lambda classe: classe[0]))
-            
-        return dict(sorted(ann_data.items(), key=lambda classe: classe[0]))
-    
-    def unload_marks(self) -> dict[str, dict[str, list[str]]]:
-        """Returns a dictionary with each image's marking point data.
 
-        Returns:
-            dict[str, dict[str, list[str]]]: Dictionary with each image's marking point data of format:
-                {"image_name.png": {"class_tag_id": ["x y", ...], ...}, ...}
-        """
-        return {image.name : image.marks
-                  for image in self.list_images 
-                    for classe in image.marks 
-                      if len(image.marks) > 0
-                      if len(image.marks[classe]) > 0
-                 }
-    
-    def unload_polys(self) -> dict[str, dict[str, tuple[str, list[float], dict[str, str]]]]:
+    def unload_polys(self) -> dict[str, ImageDataType]:
         """Returns a dictionary with each image's annotation polygon data.
 
         Returns:
             dict[str, dict[str, list[str]]]: Dictionary with each image's annotation polygon data of format:
-                {"image_name.png": {"polygon_id": ("class_tag_id", [x1, y1, x2, y2, ...], {"field1": "metadata1", "field2": "metadata2", ...}), ...}, ...}
+                {"image_name.png": {"annotation_id": ("category_id", [x1, y1, x2, y2, ...], {"field1": "metadata1", "field2": "metadata2", ...}), ...}, ...}
         """
         return {image.name : {'image_size': image.size} |\
-                             {poly.polygon_id : 
-                                (poly.classe, 
-                                 poly.point_coords, 
-                                 poly.metadata)
-                                    for poly in image.ann_polys}
+                             {poly.annotation_id : poly.data() for poly in image.annotations}
                   for image in self.list_images
-                    if len(image.ann_polys) > 0
+                    if len(image.annotations) > 0
                 }
 
-    def sort_classes(self) -> None:
-        """Sorts the classes either alphabetically (in visualization mode) or by id value (marking/annotation mode).
+    def sort_categories(self) -> None:
+        """Sorts the categories either by id value.
         """
-        key = lambda classe: classe[1]['id']
-        self.classes = dict(sorted(self.classes.items(), key=key))
+        key = lambda category: category[1]['id']
+        self.categories = dict(sorted(self.categories.items(), key=key))
         
     # ---------------------------------------------------------- #
     
-    def clean(self, clear_classes: bool = True) -> None:
+    def clean(self, clear_categories: bool = True) -> None:
         """Completely wipes the data in ImageData.
         """
         self.directory = ''
@@ -413,7 +360,7 @@ class ImageData:
         self.list_images[self.active_index].unload()
         self.list_images.clear()
         self.active_index = 0
-        self.classes.clear()
+        if clear_categories: self.categories.clear()
         
     # ---------------------------------------------------------- #
         
@@ -421,8 +368,8 @@ class ImageData:
         return len(self.list_images)
 
     def __str__(self) -> str:
-        return f"direcotry = {self.directory} \nmode = {self.mode} \nsecondary mode = {self.sec_mode} \ndate_create = {self.date_create} \ndate_last = {self.date_last}" +\
-                "\nclasses: \n  > " + "\n  > ".join([f"{index} - {'; '.join([f"{name} : {data}" for name, data in class_data.items()])}" for index, class_data in self.classes.items()]) +\
+        return f"direcotry = {self.directory} \nmode = {self.mode} \ndate_create = {self.date_create} \ndate_last = {self.date_last}" +\
+                "\ncategories: \n  > " + "\n  > ".join([f"{index} - {'; '.join([f"{name} : {data}" for name, data in categories_data.items()])}" for index, categories_data in self.categories.items()]) +\
                 "\nlist_images: \n  " + '\n  '.join([str(image).replace('\n', '\n  ') for image in self.list_images])
 # ========================================================== #
 # ========================================================== #
@@ -432,23 +379,18 @@ class ImageLoader:
     """Class to handle loading and saving folders and projects."""
     def __init__(self,
                  master,
-                 config_path: str,
-                 config: dict[str, Any],
-                 gettext: Callable[[str], str]) -> None:
+                 config_path: str) -> None:
         """Class to handle loading and saving folders and projects.
 
         Args:
-            master (_type_): MainWindow class.
+            master (_type_): MainWindow categories.
             config_path (str): Path of configuration file.
-            config (dict[str, Any]): Current active configurations.
             gettext (Callable[[str], str]): Text translation function.
         """
         
         self.master = master
         self.images: list[ImageData | None] = [None]
         self.config_path: str = config_path
-        self.config = config
-        _ = gettext
         self.img_dir: str = ''
         self.last_saved_dir: str = ''
     
@@ -519,7 +461,7 @@ class ImageLoader:
         return True
     
     def select_directory(self, parent: Any, preset_directory: Optional[str] = None) -> tuple[(str | None), dict]:
-        """Prompts the user to save unsaved data, keep already created classes for the new project and choose an image directory.
+        """Prompts the user to save unsaved data, keep already created categories for the new project and choose an image directory.
         
         Args:
             parent (Any): 
@@ -528,20 +470,21 @@ class ImageLoader:
                 Preset directory to be loaded instead of prompting for a new one. Defaults to None.
         
         Returns:
-            directory&classes (tuple[str | None, dict]): 
-                Tuple containing chosen directory path & classes preset to be loaded with the project.
+            directory&categories (tuple[str | None, dict]): 
+                Tuple containing chosen directory path & categories preset to be loaded with the project.
         """
         self.save_unsaved()
         
-        if self.images[0] is not None and len(self.images[0].classes) > 0:
-            keep_classes = messagebox.askyesno(
-                                title=_("Keep classes"), 
-                                message=_("Would you like to keep the classes already set up on your new project?")
+        if self.images[0] is not None and len(self.images[0].categories) > 0:
+            keep_categories = messagebox.askyesno(
+                                title=_("Keep categories"), 
+                                message=_("Would you like to keep the categories already set up on your new project?")
                             )
-            if keep_classes: classes = self.images[0].classes.copy()
-            self.images[0].clean()
+            categories = self.images[0].categories.copy() if keep_categories else {}
+            
+            self.images[0].clean(keep_categories)
             self.images[0] = None
-        else: classes = {}
+        else: categories = {}
         self.master._update()
         
         if preset_directory:
@@ -549,19 +492,18 @@ class ImageLoader:
         else:
             directory = self.directory_prompt(parent)
         
-        return directory, classes
+        return directory, categories
     
-    def load_directory(self, directory: str, mode: str, sec_mode: str, classes: dict) -> None:
+    def load_directory(self, directory: str, mode: Literal['manual', 'semiauto'], categories: dict) -> None:
         """Creates a new ImageData object with the given data and loads the given directory.
 
         Args:
             directory (str): Image directory path.
             mode (str): Project mode.
-            sec_mode (str): Project mode specification.
-            classes (dict): Classes preset to be added to the project.
+            categories (dict): categories preset to be added to the project.
         """
         self.img_dir = directory
-        self.images[0] = ImageData(directory, mode, sec_mode, classes=classes)
+        self.images[0] = ImageData(directory, mode, categories=categories)
         self.images[0].load_directory()
         
         self.master._update()
@@ -583,7 +525,7 @@ class ImageLoader:
             file_path = filedialog.askopenfilename(
                 title=_('Select project file'),
                 filetypes=[(_("json file"), "*.json")])
-            if file_path in [None, '', ()]: return (None, None)
+            if file_path in [None, '', ()]: return 
             elif not ospath.isfile(file_path): 
                 messagebox.showerror(
                     title=_("Invalid file"),
@@ -598,7 +540,7 @@ class ImageLoader:
             all_data: dict = json.load(file)
         
         try:
-            for data_section in ['directory', 'mode', 'date_create', 'date_last', 'classes']:
+            for data_section in ['directory', 'mode', 'date_create', 'date_last', 'categories']:
                 all_data[data_section]
         except KeyError:
             messagebox.showerror(
@@ -636,22 +578,17 @@ class ImageLoader:
         if 'save_dir' in all_data.keys(): # In case of a backup save file, the last save directory.
             self.last_saved_dir = all_data.pop('save_dir')
         
-        if file_path not in self.config['recent'] and '.bak' not in file_path:
-            self.config['recent'].append(file_path) # Adds to the recent loaded files.
+        if file_path not in CONFIG.recent and '.bak' not in file_path:
+            CONFIG.recent.append(file_path) # Adds to the recent loaded files.
         
         self.images[0] = ImageData(all_data['directory'],
                                    all_data['mode'],
-                                   all_data['sec_mode'],
                                    all_data['date_create'],
                                    all_data['date_last'],
-                                   all_data['classes'])
+                                   all_data['categories'])
         self.img_dir = all_data['directory']
         
-        if all_data['mode'] == 'semiauto':
-            last = self.images[0].load_marks(all_data['all_marks'])
-        elif all_data['mode'] == 'manual':
-            self.images[0].sec_mode = all_data['sec_mode']
-            last = self.images[0].load_annpolygons(all_data['all_ann'])
+        last = self.images[0].load_annpolygons(all_data['all_ann'])
         self.master._update()
         if last[0] == 0: return
         from_last = messagebox.askyesno(
@@ -703,10 +640,7 @@ class ImageLoader:
        
         now = self.images[0].update_date(save_mode)
         all_data = asdict(self.images[0])
-        if project_mode == 'semiauto':
-            all_data['all_marks'] = self.images[0].unload_marks()
-        elif project_mode == 'manual':
-            all_data['all_ann'] = self.images[0].unload_polys()
+        all_data['all_ann'] = self.images[0].unload_polys()
             
         if save_mode == 'backup':
             file_path = ospath.join(self.config_path, file_name + '.bak.json')
@@ -723,8 +657,8 @@ class ImageLoader:
                 json.dump(all_data, output, indent=4, separators=(', ', ': '))
         
         else:
-            initialdir = self.img_dir if self.config['default_output'] == '' \
-                else self.config['default_output']
+            initialdir = self.img_dir if CONFIG.default_output == '' \
+                else CONFIG.default_output
             file_path = filedialog.asksaveasfilename(
                 title=_('Choose annotation output'),
                 initialdir=initialdir,
